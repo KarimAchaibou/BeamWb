@@ -3,6 +3,19 @@ import numpy as np
 from standards.BaseStandard import BaseStandard
 from standards.Registry import StandardsRegistry
 
+def _safe_ratio(num, den):
+    """Safe utilization ratio: returns 0.0 if denominator is zero/invalid."""
+    try:
+        den = float(den)
+        num = float(num)
+    except Exception:
+        return 0.0
+
+    if abs(den) <= 1e-12:
+        return 0.0
+    return num / den
+
+
 # Try to import PrettyTable for nice reporting
 try:
     from prettytable import PrettyTable
@@ -96,29 +109,71 @@ class Eurocode3Standard(BaseStandard):
         section_class = self._classify_section_geometry()
         st = self.section_type
 
-        # 2. Shear Areas (Av) and Plastic Shear Resistance
+        # # 2. Shear Areas (Av) and Plastic Shear Resistance
+        # Av_y, Av_z = 0.0, 0.0
+        #
+        # # Logic based on Explicit Section Type
+        # if st == "Tubular":
+        #     Av_y = (2 * self.A) / math.pi
+        #     Av_z = (2 * self.A) / math.pi
+        # elif st in ["Rectangle", "HSS"]:
+        #     Av_z = (self.A * self.h) / (self.h + self.b)
+        #     Av_y = (self.A * self.b) / (self.h + self.b)
+        # elif st in ["C-Shape", "U-Shape"]:
+        #     Av_z = self.h * self.tw
+        #     Av_y = 2 * self.b * self.tf
+        # elif st == "L-Shape":
+        #     Av_z = self.h * self.tw
+        #     Av_y = self.b * self.tf
+        # else:
+        #     Av_z = self.A - 2 * self.b * self.tf + (self.tw + 2 * self.tf) * self.tw
+        #     if Av_z < self.h * self.tw: Av_z = self.h * self.tw
+        #     Av_y = 2 * self.b * self.tf
+        #
+        # Vpl_Rd_z = (Av_z * (self.fy / math.sqrt(3))) / gamma_m0
+        # Vpl_Rd_y = (Av_y * (self.fy / math.sqrt(3))) / gamma_m0
+
+        # 2. Shear Areas (Av) and Plastic Shear Resistance - NEW
         Av_y, Av_z = 0.0, 0.0
+        Vpl_Rd_y, Vpl_Rd_z = 0.0, 0.0
+        warn_missing_open_geometry = False
 
         # Logic based on Explicit Section Type
         if st == "Tubular":
             Av_y = (2 * self.A) / math.pi
             Av_z = (2 * self.A) / math.pi
-        elif st in ["Rectangle", "HSS"]:
-            Av_z = (self.A * self.h) / (self.h + self.b)
-            Av_y = (self.A * self.b) / (self.h + self.b)
-        elif st in ["C-Shape", "U-Shape"]:
-            Av_z = self.h * self.tw
-            Av_y = 2 * self.b * self.tf
-        elif st == "L-Shape":
-            Av_z = self.h * self.tw
-            Av_y = self.b * self.tf
-        else:
-            Av_z = self.A - 2 * self.b * self.tf + (self.tw + 2 * self.tf) * self.tw
-            if Av_z < self.h * self.tw: Av_z = self.h * self.tw
-            Av_y = 2 * self.b * self.tf
 
-        Vpl_Rd_z = (Av_z * (self.fy / math.sqrt(3))) / gamma_m0
-        Vpl_Rd_y = (Av_y * (self.fy / math.sqrt(3))) / gamma_m0
+        elif st in ["Rectangle", "HSS"]:
+            denom = self.h + self.b
+            if denom > 0:
+                Av_z = (self.A * self.h) / denom
+                Av_y = (self.A * self.b) / denom
+
+        elif st in ["C-Shape", "U-Shape"]:
+            if self.h > 0 and self.b > 0 and self.tw > 0 and self.tf > 0:
+                Av_z = self.h * self.tw
+                Av_y = 2 * self.b * self.tf
+            else:
+                warn_missing_open_geometry = True
+
+        elif st == "L-Shape":
+            if self.h > 0 and self.b > 0 and self.tw > 0 and self.tf > 0:
+                Av_z = self.h * self.tw
+                Av_y = self.b * self.tf
+            else:
+                warn_missing_open_geometry = True
+
+        else:
+            if self.b > 0 and self.tf > 0 and self.tw > 0:
+                Av_z = self.A - 2 * self.b * self.tf + (self.tw + 2 * self.tf) * self.tw
+                if self.h > 0 and Av_z < self.h * self.tw:
+                    Av_z = self.h * self.tw
+                Av_y = 2 * self.b * self.tf
+
+        if Av_z > 0:
+            Vpl_Rd_z = (Av_z * (self.fy / math.sqrt(3))) / gamma_m0
+        if Av_y > 0:
+            Vpl_Rd_y = (Av_y * (self.fy / math.sqrt(3))) / gamma_m0
 
         # 3. Resistances (Moment & Axial)
         W_y_const = self.Wpl_y if section_class <= 2 else self.Wel_y
@@ -128,27 +183,52 @@ class Eurocode3Standard(BaseStandard):
         Mc_Rd_z = (W_z_const * self.fy) / gamma_m0
         Nc_Rd = (self.A * self.fy) / gamma_m0
 
-        # 4. Torsion Resistance (T_Rd)
+        # # 4. Torsion Resistance (T_Rd)
+        # tau_Rd = self.fy / (math.sqrt(3) * gamma_m0)
+        # T_Rd = 1e-9  # Avoid div by zero
+        #
+        # if st in ["Tubular", "Rectangle", "HSS"]:
+        #     if st == "Tubular":
+        #         t_val = self.t
+        #         d_mid = self.d - t_val
+        #         Am = math.pi * (d_mid ** 2) / 4.0
+        #     else:
+        #         t_val = self.t if self.t > 0 else self.tw
+        #         Am = (self.h - t_val) * (self.b - t_val)
+        #
+        #     if t_val > 0: T_Rd = tau_Rd * 2 * Am * t_val
+        # else:
+        #     if self.b > 0 and self.tw == self.tf:
+        #         t_max = self.tw
+        #     else:
+        #         t_max = max(self.tf, self.tw)
+        #
+        #     if t_max > 0: T_Rd = (tau_Rd * self.It) / t_max
+
+        # 4. Torsion Resistance (T_Rd) - NEW
         tau_Rd = self.fy / (math.sqrt(3) * gamma_m0)
-        T_Rd = 1e-9  # Avoid div by zero
+        T_Rd = 0.0
 
         if st in ["Tubular", "Rectangle", "HSS"]:
             if st == "Tubular":
                 t_val = self.t
                 d_mid = self.d - t_val
-                Am = math.pi * (d_mid ** 2) / 4.0
+                Am = math.pi * (d_mid ** 2) / 4.0 if d_mid > 0 else 0.0
             else:
                 t_val = self.t if self.t > 0 else self.tw
-                Am = (self.h - t_val) * (self.b - t_val)
+                Am = (self.h - t_val) * (self.b - t_val) if self.h > t_val and self.b > t_val else 0.0
 
-            if t_val > 0: T_Rd = tau_Rd * 2 * Am * t_val
+            if t_val > 0 and Am > 0:
+                T_Rd = tau_Rd * 2 * Am * t_val
+
         else:
             if self.b > 0 and self.tw == self.tf:
                 t_max = self.tw
             else:
                 t_max = max(self.tf, self.tw)
 
-            if t_max > 0: T_Rd = (tau_Rd * self.It) / t_max
+            if t_max > 0 and self.It > 0:
+                T_Rd = (tau_Rd * self.It) / t_max
 
         # 5. Stability (Buckling)
         Ncr_y = (math.pi ** 2 * self.E * self.Iy) / (Lcr_y ** 2)
@@ -196,9 +276,16 @@ class Eurocode3Standard(BaseStandard):
 
         # A. Cross Section Resistance Checks
         # Shear
-        UC_shear_y = Vy / Vpl_Rd_y if Vpl_Rd_y > 0 else np.zeros_like(Vy)
-        UC_shear_z = Vz / Vpl_Rd_z if Vpl_Rd_z > 0 else np.zeros_like(Vz)
-        UC_torsion = Tx / T_Rd
+        # UC_shear_y = Vy / Vpl_Rd_y if Vpl_Rd_y > 0 else np.zeros_like(Vy)
+        # UC_shear_z = Vz / Vpl_Rd_z if Vpl_Rd_z > 0 else np.zeros_like(Vz)
+        # UC_torsion = Tx / T_Rd
+        # UC_shear = np.maximum(UC_shear_y, np.maximum(UC_shear_z, UC_torsion))
+
+        # A. Cross Section Resistance Checks
+        # Shear
+        UC_shear_y = np.array([_safe_ratio(v, Vpl_Rd_y) for v in Vy])
+        UC_shear_z = np.array([_safe_ratio(v, Vpl_Rd_z) for v in Vz])
+        UC_torsion = np.array([_safe_ratio(t, T_Rd) for t in Tx])
         UC_shear = np.maximum(UC_shear_y, np.maximum(UC_shear_z, UC_torsion))
 
         # Combined Axial + Bending (Cross Section)
@@ -323,14 +410,20 @@ class Eurocode3Standard(BaseStandard):
             t1.title = f"Critical Check at x={c.get('pos', 0):.2f}m"
             t1.field_names = ["Force", "Design (Ed)", "Resist (Rd)", "UC"]
 
+            # def row(n, ed, rd, u=""):
+            #     return [n, f"{abs(ed) / 1000:.1f} {u}", f"{rd / 1000:.1f} {u}", f"{abs(ed) / rd if rd else 0:.2f}"]
+
+            # NEW
             def row(n, ed, rd, u=""):
-                return [n, f"{abs(ed) / 1000:.1f} {u}", f"{rd / 1000:.1f} {u}", f"{abs(ed) / rd if rd else 0:.2f}"]
+                uc = _safe_ratio(abs(ed), rd)
+                return [n, f"{abs(ed) / 1000:.1f} {u}", f"{rd / 1000:.1f} {u}", f"{uc:.2f}"]
 
             t1.add_row(row("N_Ed", c.get('Ned', 0), c.get('Nc_Rd', 0), "kN"))
             t1.add_row(row("My_Ed", c.get('My', 0), c.get('Mc_Rd_y', 0), "kNm"))
             t1.add_row(row("Mz_Ed", c.get('Mz', 0), c.get('Mc_Rd_z', 0), "kNm"))
             t1.add_row(row("Vy_Ed", c.get('Vy', 0), c.get('Vpl_Rd_y', 0), "kN"))
             t1.add_row(row("Vz_Ed", c.get('Vz', 0), c.get('Vpl_Rd_z', 0), "kN"))
+            t1.add_row(row("Tx_Ed", c.get('Tx', 0), c.get('T_Rd', 0), "kNm"))
             lines.append(str(t1))
             lines.append("")
 
@@ -339,6 +432,10 @@ class Eurocode3Standard(BaseStandard):
         lines.append(f"1. GEOMETRY & CLASSIFICATION")
         lines.append(f"   Section: {self.section_type}")
         lines.append(f"   Class: {s_class} (Epsilon={self.epsilon:.3f})")
+        # NEW --------------------
+        if self.section_type in ["C-Shape", "U-Shape"] and (self.h <= 0 or self.b <= 0 or self.tw <= 0 or self.tf <= 0):
+            lines.append("   WARNING: missing h/b/tw/tf for open section -> shear/torsion UC ignored")
+        # ------------------------
         lines.append(f"   Modulus used: Wy={c.get('W_y', 0) * 1e6:.1f} cm3,     Wz={c.get('W_z', 0) * 1e6:.1f} cm3")
         lines.append(f"   Modulus used: Wy={c.get('W_y', 0) * 1e6:.1f} cm3,     Wz={c.get('W_z', 0) * 1e6:.1f} cm3")
         lines.append(f"2. BEAM RESISTANCE")
@@ -384,6 +481,13 @@ class Eurocode3Standard(BaseStandard):
         lines.append(
             f"      -> {abs(c.get('Ned', 0)) / c.get('Nb_Rd_z', 1):.2f} + {c.get('kzy', 0):.2f}*{c.get('My', 0) / c.get('Mb_Rd', 1):.2f} + {c.get('kzz', 0):.2f}*{c.get('Mz', 0) / c.get('Mc_Rd_z', 1):.2f}")
         lines.append(f"      = {c.get('uc_stab_662', 0):.3f}")
+
+        # NEW ---------------
+        lines.append(f"   Torsion UC = {c.get('uc_torsion', 0):.3f}")
+        lines.append(f"   Shear/Torsion UC = {c.get('uc_shear', 0):.3f}")
+        lines.append(f"   Section combined UC = {c.get('uc_sec', 0):.3f}")
+        lines.append(f"   Stability UC = {c.get('uc_stab', 0):.3f}")
+        #--------------------
 
         lines.append(f"\n   MAX UC: {max_uc:.3f}")
 
