@@ -521,7 +521,7 @@ class SectionLibraryViewProvider:
                         f"{get_val(obj.Wpl_z, 'cm^3'):.2f}"
                     ])
                 except Exception as e:
-                    App.Console.PrintPrintWarning(f"Skipping section {obj.Label}: {e}\n")
+                    App.Console.PrintWarning(f"Skipping section {obj.Label}: {e}\n")
 
         # --- 2. PRINT OUTPUT ---
         header_string = "\n--- Section Properties List ---\n"
