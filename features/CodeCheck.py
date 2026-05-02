@@ -194,13 +194,63 @@ class CodeCheckFeature:
         def get_dim(p):
             return getattr(s, p).getValueAs('m').Value if hasattr(s, p) else 0.0
 
+        #if st in ["I-Shape", "H-Shape", "T-Shape"]:
+        #    dims.update({'h': get_dim("Height"), 'b': get_dim("Width"), 'tw': get_dim("WebThickness"),
+        #                 'tf': get_dim("FlangeThickness")})
+        #elif st in ["Rectangle", "HSS", "Tubular"]:
+        #    dims.update({'h': get_dim("Height"), 'b': get_dim("Width"),
+        #                 't': get_dim("Thickness") if hasattr(s, "Thickness") else 0.0})
+        #    if st == "Tubular": dims['d'] = dims['b']
+        
         if st in ["I-Shape", "H-Shape", "T-Shape"]:
-            dims.update({'h': get_dim("Height"), 'b': get_dim("Width"), 'tw': get_dim("WebThickness"),
-                         'tf': get_dim("FlangeThickness")})
+            dims.update({
+                'h': get_dim("Height"),
+                'b': get_dim("Width"),
+                'tw': get_dim("WebThickness"),
+                'tf': get_dim("FlangeThickness")
+            })
+
+        elif st in ["U-Shape", "C-Shape"]:
+            dims.update({
+                'h': get_dim("Height"),
+                'b': get_dim("Width")
+            })
+
+            # Support both explicit web/flange thicknesses and single Thickness
+            if hasattr(s, "WebThickness") and hasattr(s, "FlangeThickness"):
+                dims['tw'] = get_dim("WebThickness")
+                dims['tf'] = get_dim("FlangeThickness")
+            elif hasattr(s, "Thickness"):
+                tval = get_dim("Thickness")
+                dims['tw'] = tval
+                dims['tf'] = tval
+
+        elif st == "L-Shape":
+            dims.update({
+                'h': get_dim("Height"),
+                'b': get_dim("Width")
+            })
+
+            if hasattr(s, "WebThickness") and hasattr(s, "FlangeThickness"):
+                dims['tw'] = get_dim("WebThickness")
+                dims['tf'] = get_dim("FlangeThickness")
+            elif hasattr(s, "Thickness"):
+                tval = get_dim("Thickness")
+                dims['tw'] = tval
+                dims['tf'] = tval
+
         elif st in ["Rectangle", "HSS", "Tubular"]:
-            dims.update({'h': get_dim("Height"), 'b': get_dim("Width"),
-                         't': get_dim("Thickness") if hasattr(s, "Thickness") else 0.0})
-            if st == "Tubular": dims['d'] = dims['b']
+            dims.update({
+                'h': get_dim("Height"),
+                'b': get_dim("Width"),
+                't': get_dim("Thickness") if hasattr(s, "Thickness") else 0.0
+            })
+            if st in ["Rectangle", "HSS"] and dims['t'] > 0.0:
+                # Also populate tw/tf for formulas that expect them
+                dims['tw'] = dims['t']
+                dims['tf'] = dims['t']
+            if st == "Tubular":
+                dims['d'] = dims['b']      
 
         # --- 2. Section Properties ---
         sp = dims.copy()
